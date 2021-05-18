@@ -1,0 +1,97 @@
+-- MBDES Assignment 4 - Lustre
+-- Fredrik Tåkvist, Nusrat Hossain, Neethu Joseph
+
+-- Count from receiving startSignal until count reaches val
+-- while startSignal is true, counter will stay at 1
+node CountUntil(startSignal : bool; val : int) returns (n : int);
+let
+    n = 0 -> (if startSignal then 1 
+              else (if 0 < pre n and pre n <= val 
+                    then 1 + pre n else 0));
+tel
+
+-- Traffic light
+-- initialRed : true if initially red
+-- toGreen : true for one cycle when traffic light should switch to green
+-- toRed : true for one cycle when traffic light should switch to red
+-- outputs the state of the green, amber and red lights
+node TrafficLight(initialRed, toGreen, toRed : bool)
+     returns (green, amber, red : bool);
+var cnt : int;
+let
+    -- count time for amber
+    cnt = CountUntil(toGreen, 3);
+    
+    -- turn off when switching to red, turn on when finished counting
+    green = (not initialRed) -> (if toRed then false 
+                                 else (if cnt = 3 then true 
+                                       else pre green));
+    -- turn on when switching from red to green, turn off when finished counting
+    amber = false -> (if pre red and toGreen then true 
+                        else (if cnt = 3 then false 
+                                         else pre amber));
+    -- turn on when switching to red, turn off when finished counting
+    red   = initialRed -> (if toRed then true 
+                           else (if cnt = 3 then false 
+                                 else pre red));
+tel
+
+-- Traffic light system
+-- When detecting a car, switch light 2 to green and light 1 to red
+-- after 6 cycles of no car detected, switch back
+node TSystem(carSensor : bool) returns (g1, a1, r1, g2, a2, r2 : bool);
+var cnt : int;
+let
+    -- start counting
+    cnt = CountUntil(carSensor and pre g1, 6);
+    --toggle traffic lights
+    -- switch light 1 to green after 6 cycles of no cars detected
+    -- switch to red when green and car detected
+    (g1, a1, r1) = TrafficLight(false, cnt = 6, carSensor and pre g1);
+    -- for light 2, it's vice versa
+    (g2, a2, r2) = TrafficLight(true, carSensor and pre g1, cnt = 6);
+tel
+
+node HasHappened(X : bool) returns (Y : bool);
+let
+    Y = X -> (X or pre Y);
+tel
+
+-- Synchronus observer for the traffic light node
+node ReqTrafficLight(initialRed, toGreen, toRed : bool)
+    returns (ok1, ok2, ok3 : bool);
+var green, amber, red : bool;
+let
+    (green, amber, red) = TrafficLight(initialRed, toGreen, toRed);
+    -- Req 1: no red and green at the same time
+    ok1 = not (red and green);  --(red => not green) and (green => not red);
+    -- Req 2: some signal is always shown
+    ok2 = red or amber or green;
+    -- Req 3: no amber and green at the same time
+    ok3 = not (amber and green); --(amber => not green) and (green => not amber);
+    --%PROPERTY ok1;
+    --%PROPERTY ok2;
+    --%PROPERTY ok3;
+tel
+
+-- Synchronus observer for the traffic light system
+node ReqTSystem(carSensor : bool) returns (ok1, ok2 : bool);
+var g1, a1, r1, g2, a2, r2 : bool;
+let
+    (g1, a1, r1, g2, a2, r2) = TSystem(carSensor);
+    
+    -- Req 4: the signals do not both show green at the same time
+    ok1 = not (g1 and g2);
+    -- if switching from red to green, must have been amber at some point
+    ok2 = (g1 and HasHappened(r1) => HasHappened(a1)) and 
+          (g2 and HasHappened(r2) => HasHappened(a2));
+    --%PROPERTY ok1;
+    --%PROPERTY ok2;
+tel
+
+-- Results of verification:
+-- > luke --node ReqTrafficLight --verify a4.lus
+-- Valid. All checks succeeded. Maximal depth was 1.
+--
+-- > luke --node ReqTSystem --verify a4.lus
+-- Valid. All checks succeeded. Maximal depth was 8.
